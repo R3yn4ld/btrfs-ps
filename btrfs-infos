@@ -1,0 +1,585 @@
+#!/bin/bash
+fiUsageFile=/tmp/fi_usage_${1///}
+fiUsageFile_stats=/tmp/fi_usage_stats_${1///}
+fiUsageFile_b=/tmp/fi_usage_b_${1///}
+deUsageFile=/tmp/de_usage_${1///}
+deUsageFile_b=/tmp/de_usage_b_${1///}
+CMD_JQ=$(which jq) || (echo "Dependancy missing: jq" && exit 127)
+CMD_BC=$(which bc) || (echo "Dependancy missing: bc" && exit 127)
+
+function jsonArrayToTable(){
+  jq -r '(.[0] | ([keys_unsorted[] | .] |(., map(length*"~")))), (.[] | ([keys_unsorted[] as $k | .[$k]])) | @tsv' | column -t -s $'\t'
+}
+
+function drawLine(){
+#  printf '%.s~' $(seq 1 $(tput cols)) #terminal width
+  printf '%.s~' $(seq 1 $total_width)
+  echo ""
+}
+
+devicepath_width=${#1}
+free_width=8
+total_width=0
+function drawJsonTableSeparator(){
+  total_width2=0
+  #separator
+  separator=$(echo "$data_js]" |jsonArrayToTable | grep "~~")
+  data_js="$data_js, {"
+  imin=0
+  imax=${#keylist[@]}
+  total_width2=$(echo "$total_width2+2*$imax-2" | bc)
+  [[ ! -z $1 ]] && imin=$1
+  [[ ! -z $2 ]] && imax=$2
+  for ((i=$imin; i<$imax; i++))
+  do
+    keyvar="${keylist[$i]}"
+    j=$((i+1))
+    if [[ $keyvar == "Device Path" ]] && [[ $devicepath_width -gt ${#keyvar} ]]; then
+      valuevar=$(printf '%.s~' $(seq 1 $devicepath_width))
+    elif [[ $keyvar == "Reserve" ]] && [[ $reserve_width -gt ${#keyvar} ]]; then
+      valuevar=$(printf '%.s~' $(seq 1 $reserve_width))
+    elif [[ $keyvar == "Free %" ]] ; then
+      valuevar=$(printf '%.s~' $(seq 1 $free_width))
+    else
+      valuevar=$(echo $separator | awk -v j=$j  '{print $j}')
+    fi
+    if [[ $j -lt $imax ]]; then
+      data_js="$data_js\"$keyvar\":\"$valuevar\", "
+    else
+      data_js="$data_js\"$keyvar\":\"$valuevar\"}"
+    fi
+    total_width2=$(echo "$total_width2+${#valuevar}" | bc)
+   [[ $total_width2 -gt $total_width ]] && total_width=$total_width2
+  done
+}
+
+
+shopt -s lastpipe
+
+#Get device usage stats
+
+sudo btrfs device     usage --iec $1 > $deUsageFile # size human readable (IEC) with warnings on stdout
+sudo btrfs device     usage -b $1 &> $deUsageFile_b #size in bytes without warnings
+
+#Get filesystem usage stats
+sudo btrfs filesystem usage --iec $1 > $fiUsageFile
+cp $fiUsageFile $fiUsageFile_stats
+sed '/%/!d' -i $fiUsageFile_stats # keep only percentage stats
+#Get filesystem device usage data
+sudo btrfs filesystem usage --iec $1 > $fiUsageFile #IEC human
+sudo btrfs filesystem usage -b $1 > $fiUsageFile_b #bytes
+
+#Get filesystem global usage data
+#Get data for stats
+dev_size=$(cat $fiUsageFile | grep -m1 "Device size" |awk '{print $3}')
+dev_allocated=$(cat $fiUsageFile | grep -m1 "Device allocated" | awk '{print $3}')
+dev_used=$(cat $fiUsageFile | grep -m1 "Used:" | awk '{print $2}')
+dev_unallocated=$(cat $fiUsageFile | grep -m1 "Device unallocated" | awk '{print $3}')
+free_estimated=$(cat $fiUsageFile | grep -m1 "Free (estimated)" | awk '{print $3}')
+free_estimated_min=$(cat $fiUsageFile | grep -m1 "Free (estimated)" | awk '{print $5}')
+  free_estimated_min=${free_estimated_min::-1}
+free_statfs=$(cat $fiUsageFile | grep -m1 "Free (statfs, df)" | awk '{print $4}')
+data_ratio=$(cat $fiUsageFile | grep -m1 "Data ratio:" | awk '{print $3}')
+metadata_ratio=$(cat $fiUsageFile | grep -m1 "Metadata ratio:" | awk '{print $3}')
+global_reserve=$(cat $fiUsageFile | grep -m1 "Global reserve:" | awk '{print $3}')
+if [[ ${#global_reserve} -gt 14 ]]; then
+  reserve_width=${#value}
+else
+  reserve_width=14
+fi
+global_reserve_used=$(cat $fiUsageFile | grep -m1 "Global reserve:" | awk '{print $5}')
+global_reserve_used=${global_reserve_used::-1}
+
+#Get data for calcs
+dev_size_b=$(cat $fiUsageFile_b | grep -m1 "Device size" |awk '{print $3}')
+dev_used_b=$(cat $fiUsageFile_b | grep -m1 "Used:" | awk '{print $2}')
+dev_allocated_b=$(cat $fiUsageFile_b | grep -m1 "Device allocated" | awk '{print $3}')
+  a=${dev_allocated_b}
+  u=${dev_used_b}
+  dev_allocated_pct=$(echo $(echo "scale=2;$u*100/$a" | bc)"%")
+dev_unallocated_b=$(cat $fiUsageFile_b | grep -m1 "Device unallocated" | awk '{print $3}')
+  s=${dev_size_b}
+  u=${dev_unallocated_b}
+  free_unallocated_pct=$(echo $(echo "scale=2;$u*100/$s" | bc)"%")
+free_statfs_b=$(cat $fiUsageFile_b | grep -m1 "Free (statfs, df)" | awk '{print $4}')
+  s=${dev_size_b}
+  sd=${free_statfs_b}
+  free_statfs_pct=$(echo $(echo "scale=2;$sd*100/$s" | bc)"%")
+free_estimated_b=$(cat $fiUsageFile_b | grep -m1 "Free (estimated)" | awk '{print $3}')
+  s=${dev_size_b}
+  f=${free_estimated_b}
+  free_estimated_pct=$(echo $(echo "scale=2;$f*100/$s" | bc)"%")
+free_estimated_min_b=$(cat $fiUsageFile_b | grep -m1 "Free (estimated)" | awk '{print $5}')
+  free_estimated_min_b=${free_estimated_min_b::-1}
+  s=${dev_size_b}
+  f=${free_estimated_min_b}
+  free_estimated_min_pct=$(echo $(echo "scale=2;$f*100/$s" | bc)"%")
+global_reserve_b=$(cat $fiUsageFile_b | grep -m1 "Global reserve:" | awk '{print $3}')
+global_reserve_used_b=$(cat $fiUsageFile_b | grep -m1 "Global reserve:" | awk '{print $5}')
+global_reserve_used_b=${global_reserve_used_b::-1}
+  a=${global_reserve_b}
+  u=${global_reserve_used_b}
+  global_reserve_pct=$(echo $(echo "scale=3;$u*100/$a" | bc)"%")
+
+#Get scrub status
+sudo btrfs scrub status $1 | while read line
+do
+  key=$(echo ${line%%:*} | xargs)
+  value=$(echo ${line#*:} | xargs)
+  if [[ $key != "UUID" ]]
+  then
+    if [[ $key = "Scrub started" ]] || [[ $key = "Scrub resumed" ]] || [[ $key = "ETA" ]]
+    then
+      if [[ $(date +'%a %d/%m') == $(date -d "$value" +'%a %d/%m') ]]
+      then
+        value=$(date -d "$value" +'%H:%M:%S')
+        [[ $key == "Scrub started" ]] && key="Started at"
+        [[ $key == "Scrub resumed" ]] && key="Resumed at"
+        [[ $key == "ETA" ]] && key="Est. completion at"
+      else
+        value=$(date -d "$value" +'%a %d/%m %H:%M:%S')
+        [[ $key == "Scrub started" ]] && key="Started on"
+        [[ $key == "Scrub resumed" ]] && key="Resumed on"
+        [[ $key == "ETA" ]] && key="Est. completion on"
+      fi
+    fi
+    if [[ $key != "Status" ]]
+    then
+      filler=$(printf '%.s ' $(seq 1 ${#value}))
+      key=$(printf '%s\n' "$key${filler:${#key}}")
+      if [[ -z $scrub_status_js ]]; then
+        scrub_status_js="[{"
+      else
+        scrub_status_js="$scrub_status_js, "
+      fi
+      scrub_status_js="$scrub_status_js\"$key\":\"$value\""
+    else
+      scrub_state=$(echo $value | xargs)
+      [[ $scrub_state == "aborted" ]] && scrub_state="Last scrub statistics (aborted)"
+      [[ $scrub_state == "finished" ]] && scrub_state="Last scrub statistics"
+      [[ $scrub_state == "running" ]] && scrub_state="Scrub in progress"
+    fi
+  else
+    uuid=$(echo $value | xargs)
+    scrub_state="Scrub not running"
+  fi
+done
+if [[ $scrub_state == "Scrub not running"  ]]; then
+  scrub_status_js=""
+  scrub_status="No scrub found !"
+else
+  scrub_status_js="$scrub_status_js}]"
+fi
+
+#Get add status
+add_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'add' )
+add_arguments=$(echo $add_process | sed 's/add /%/'| cut -d'%' -f2 | sed 's|--bg||' | sed 's|--enqueue||')
+added_disk=$(echo $add_arguments | awk '{print $1}')
+dest_fs=$(echo $add_arguments | awk '{print $2}')
+if [[ $dest_fs == $1 ]]; then
+  if [[ $add_arguments == *"enqueue"* ]] ; then
+    add_status=$( echo "Addition queued for $add_arguments" | sed 's|--enqueue||')
+  else
+    add_status="Addition of $added_disk in progress"
+  fi
+fi
+
+#Get remove status
+remove_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'remove' )
+remove_arguments=$(echo $remove_process | sed 's/remove /%/'| cut -d'%' -f2 | sed 's|--bg||' | sed 's|--enqueue||')
+removed_disk=$(echo $remove_arguments | awk '{print $1}')
+dest_fs=$(echo $remove_arguments | awk '{print $2}')
+if [[ $dest_fs == $1 ]]; then
+  if [[ $remove_arguments == *"enqueue"* ]] ; then
+    remove_status=$( echo "Removal queued for $remove_arguments" | sed 's|--enqueue||')
+  else
+    remove_status="Removal of $removed_disk in progress"
+  fi
+fi
+
+#Get replace status
+replace_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'replace')
+replace_arguments=$(echo $replace_process | sed 's/replace /%/'| cut -d'%' -f2 | sed 's|--bg||' | sed 's|--enqueue||')
+replaced_disk=$(echo $replace_arguments | awk '{print $1}')
+dest_fs=$(echo $replace_arguments | awk '{print $2}')
+if [[ $dest_fs == $1 ]]; then
+  replace_status="Replacement of $replace_arguments in progress"
+fi
+replace_progress=$(echo "$(sudo btrfs replace status $1) " | grep " ${1} " )
+if [[ $replace_progress == *"done"* ]]; then
+  replace_state="Replacing of $(echo $replace_arguments |awk '{print $1}') by $(echo $replace_arguments |awk '{print $2}') in progress"
+  replace_progress=$(echo $replace_progress | sed 's|done| |g' | sed 's| write errs, | |g' | sed 's| uncorr. read errs| |g' | sed 's|, | |g' )
+  replace_status_js="[{"
+  i=1
+  for key in "Done" "Write errors" "Uncorr. read errors"; do
+    value=$(echo $replace_progress | cut -d' ' -f$i)
+      filler=$(printf '%.s ' $(seq 1 ${#value}))
+      key=$(printf '%s\n' "$key${filler:${#key}}")
+      if [[ $key != "Uncorr. read errors" ]]; then
+        replace_status_js="$replace_status_js \"$key\":\"$value\","
+        ((i++))
+      else
+        replace_status_js="$replace_status_js \"$key\":\"$value\""
+      fi
+  done
+  replace_status_js="$replace_status_js}]"
+#elif [[ $replace_progress == *"finished"* ]]; then
+#  replace_state="Last disk replacement"
+#  replace_progress=$(echo $replace_progress | sed 's|Started on ||g' | sed 's|, finished on |%|g' | sed 's| write errs, |%|g' | sed 's| uncorr. read errs|%|g' | sed 's|, |%|g' )
+#  replace_status_js="[{"
+#  i=1
+#  for key in "Started on" "Finished on" "Write errors" "Uncorr. read errors"; do
+#    value=$(echo $replace_progress | cut -d'%' -f$i)
+#      filler=$(printf '%.s ' $(seq 1 ${#value}))
+#      key=$(printf '%s\n' "$key${filler:${#key}}")
+#      if [[ $key != "Uncorr. read errors" ]]; then
+#        replace_status_js="$replace_status_js \"$key\":\"$value\","
+#        ((i++))
+#      else
+#        replace_status_js="$replace_status_js \"$key\":\"$value\""
+#      fi
+#  done
+#  replace_status_js="$replace_status_js}]"
+fi
+
+#Get balance status
+balance_progress="$(sudo btrfs balance status $1)"
+
+#balance_status=${balance_status//running/running:} # no ':' if no balance running
+balance_status=${balance_progress##*:} #will show eventually "No balance running"
+balance_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'btrfs balance start')
+
+balance_arguments=$(echo $balance_process | sed 's|start |%|' | cut -d'%' -f2 | sed "s|$1||"| sed 's|--bg||')
+if [[ $balance_status == "No balance found"* ]]  ; then
+  balance_state="Balance not running"
+  if [[ $balance_arguments == *"enqueue"* ]] ; then
+    balance_status=$( echo "Balance queued with arguments $balance_arguments" | sed 's|--enqueue||')
+  else
+    balance_status=""
+  fi
+elif [[ $balance_status == "Balance on"* ]]; then
+  [[ $balance_arguments != "" ]] && balance_state="Balance in progress with arguments: $balance_arguments"
+  [[ $balance_arguments == "" ]] && balance_state="Balance in progress with default parameters"
+  balance_status="Balance in progress"
+  balance_pid=$(echo $balance_process | awk '{print $2}')
+
+  start_time=$(ps -eo pid,lstart |grep "$balance_pid" | sed "s|$balance_pid ||")
+  start_time_epoch=$(date -d "$start_time" +%s)
+  if [[ $(date +'%a %d/%m') == $(date -d "$start_time" +'%a %d/%m') ]]
+  then
+    start_time=$(date -d "$start_time" +'%H:%M:%S')
+    started_title="Started at"
+  else
+    start_time=$(date -d "$start_time" +'%a %d/%m %H:%M:%S')
+    started_title="Started on"
+  fi
+  filler=$(printf '%.s ' $(seq 1 ${#start_time}))
+  started_title=$(printf '%s\n' "$started_title${filler:${#started_title}}")
+
+  duration_title="Duration"
+  duration=$(ps -eo pid,etime= |grep "$balance_pid" | sed "s|$balance_pid ||" | xargs)
+  lenght="${duration//[^:]}" #get number of : in $duration
+  [[ "${#lenght}" -eq 1 ]] && duration="0:$duration" #add 0: if only one to get hh:mm:ss instead of mm:ss
+  duration_s=$(TZ=utc date -d "1970-01-01 $duration" +%s)
+
+  filler=$(printf '%.s ' $(seq 1 ${#duration}))
+  duration_title=$(printf '%s\n' "$duration_title${filler:${#duration_title}}")
+
+  chunks_balanced_title="Balanced"
+  chunks_balanced=$(echo $balance_progress | awk '{print $6}')
+
+  total_chunks="$(echo $balance_progress | awk '{print $10}')"
+  time_left_s=$(echo "($duration_s/$chunks_balanced)*($total_chunks-$chunks_balanced)" | bc )
+  if [[ $time_left_s -gt 86400 ]]; then
+    time_left=$(date -d@$time_left_s -u +'%d:%H:%M:%S')
+  else
+    time_left=$(date -d@$time_left_s -u +'%H:%M:%S')
+  fi
+  filler=$(printf '%.s ' $(seq 1 ${#time_left}))
+  time_left_title="Time left"
+  time_left_title=$(printf '%s\n' "$time_left_title${filler:${#time_left_title}}")
+
+  eta=$(echo "$(date +%s)+$time_left_s" | bc)
+  if [[ $(date +'%a %d/%m') == $(date -d@$eta +'%a %d/%m') ]]
+  then
+    est_completion=$(date -d@$eta +'%H:%M:%S')
+    est_completion_title="Est. completion at"
+  else
+    est_completion=$(date -d@$eta +'%a %d/%m %H:%M:%S')
+    est_completion_title="Est. completion on"
+  fi
+
+  rate="$(echo "scale=2;($chunks_balanced/$duration_s)*60" | bc) chunks/min"
+  filler=$(printf '%.s ' $(seq 1 ${#rate}))
+  rate_title="Rate"
+  rate_title=$(printf '%s\n' "$rate_title${filler:${#rate_title}}")
+
+  chunks_balanced_pct=$(echo $(echo "scale=2;$chunks_balanced*100/$total_chunks" | bc)"%")
+  chunks_balanced="$chunks_balanced chunks ($chunks_balanced_pct)"
+  filler=$(printf '%.s ' $(seq 1 ${#chunks_balanced}))
+  chunks_balanced_title=$(printf '%s\n' "$chunks_balanced_title${filler:${#chunks_balanced_title}}")
+
+
+  balance_status_js="[{\"$started_title\":\"$start_time\", \
+                    \"$duration_title\":\"$duration\", \
+                    \"$time_left_title\":\"$time_left\", \
+                    \"$est_completion_title\":\"$est_completion\", \
+                    \"Total to balance\":\"$total_chunks chunks\", \
+                    \"$chunks_balanced_title\":\"$chunks_balanced\",
+                    \"$rate_title\":\"$rate\"}]"
+fi
+
+#Detailled stats
+export data_js="{\"Device ID\":\"\", \"Device Path\":\"\", \"Device size\":\"\", "
+cat $deUsageFile $fiUsageFile_stats | grep -v ", ID" | grep -v "Device size" | grep -v "Device slack" | grep -v "/dev"| sed 's/ //g' | sort | cut -d':' -f1 | uniq | while read keyvar
+do
+  if [[ -z $keyvar ]]; then
+    data_js=$data_js
+  else
+    if [[ $keyvar == "Unallocated" ]]; then
+      keyvar="Reserve"
+      valuevar="\"\", \"Unallocated\":\"\", \"Free %\":\"\"}"
+    fi
+    [[ $valuevar == "" ]] && valuevar="\"\","
+    data_js="$data_js \"$keyvar\":$valuevar"
+  fi
+done
+echo $data_js | jq -r 'keys_unsorted[]' | mapfile -t keylist
+
+#Get per drive data
+data_js="[$data_js" #Prepare json for multi elements
+cat $deUsageFile | while read line;
+do
+  if [[ "$line" == "/dev"*"ID"* ]]; then
+    newdata_js=''
+    key="Device Path"; value=$(echo $line | cut -d',' -f1)
+    devicepath=$value
+    [[ ${#value} -gt $devicepath_width ]] && devicepath_width=${#value}
+    newdata_js="$newdata_js{\"$key\":\"$value\","
+    data_js="$data_js, {"
+    key="Device ID"
+    value=$(echo $line | cut -d':' -f2)
+  else
+    key=$(echo $line | cut -d':' -f1)
+    value=$(echo $line | cut -d':' -f2)
+  fi
+    value=${value/ /}
+  if [[ -z $line ]]; then
+    newdata_js=$newdata_js
+  elif [[ $key == "Unallocated" ]]; then
+    newdata_js="$newdata_js \"$key\":\"$value\"}"
+    for ((i=0; i<${#keylist[@]}; i++))
+    do
+      keyvar="${keylist[$i]}"
+      valuevar=$(echo $newdata_js | jq --arg keyvar "$keyvar" '.[$keyvar]')
+      [[ $valuevar == "" ]] && valuevar="\"-\""
+      if cat $fiUsageFile | grep -v "Unallocated" |  grep "$keyvar" > /dev/null ; then
+        #append filesystem data
+        startline=$(cat $fiUsageFile | grep -m1 -n "^$keyvar" | cut -d':' -f1)
+        if [[ $startline -gt 1 ]]; then
+          stopline=$(cat $fiUsageFile | tail -n +$((startline + 1)) | grep -m1 -n ":" | cut -d':' -f1)
+          valuevar=\"$(cat $fiUsageFile | tail -n +$((startline + 1)) | head -n $((stopline - 2)) | grep $devicepath | awk '{print $2}')\"
+        fi
+      fi
+      if [[ $keyvar == "Free %" ]] ; then
+        #calculate device free space
+        device=$(echo $newdata_js | jq '.["Device Path"]')
+        startline=$(cat $deUsageFile_b | grep -m1 -n "^${device//\"/}" | cut -d':' -f1)
+        s=$(cat $deUsageFile_b | tail -n +$((startline + 1)) | grep -m1 "size" | awk '{print $3}')
+        u=$(cat $deUsageFile_b | tail -n +$((startline + 1)) | grep -m1 "Unallocated" | awk '{print $2}')
+        x=$(echo $(echo "scale=2;$u*100/$s" | bc)"%")
+        valuevar="\"$x\""
+      fi
+      j=$(( i + 1 ))
+      if [[ $j -lt ${#keylist[@]} ]]; then
+        data_js="$data_js\"$keyvar\":$valuevar, "
+      else
+        data_js="$data_js\"$keyvar\":$valuevar}"
+      fi
+    done
+  else
+    newdata_js="$newdata_js\"$key\":\"$value\", "
+  fi
+done
+drawJsonTableSeparator
+
+data_js="$data_js, {\"Device ID\":\"Total:\", \"Device Path\":\"$1\", \"Device size\":\"$dev_size\", "
+for ((i=3; i<${#keylist[@]}; i++))
+do
+  keyvar="${keylist[$i]}"
+  valuevar=""
+  if cat $fiUsageFile_stats | grep "$keyvar" > /dev/null ; then
+    valuevar="\"$(cat $fiUsageFile_stats | grep "^$keyvar" -m1 | awk '{print $2}' | cut -d':' -f2 | cut -d',' -f1)\","
+  fi
+  [[ $valuevar == "" ]] && valuevar="\"\","
+  [[ $keyvar == "Reserve" ]] && valuevar="\"$global_reserve\","
+  [[ $keyvar == "Unallocated" ]] && valuevar="\"$dev_unallocated\","
+  [[ $keyvar == "Free %" ]] && valuevar="\"$free_unallocated_pct\"}"
+  data_js="$data_js \"$keyvar\":$valuevar"
+done
+data_js="$data_js, {\"\":\"\","
+for ((i=1; i<${#keylist[@]}; i++))
+do
+  keyvar="${keylist[$i]}"
+  j=$((i+1))
+  valuevar="\"\","
+  [[ $keyvar == "Device size"* ]] && valuevar="\"( Ratio:\","
+  [[ $keyvar == "Data"* ]] && valuevar="\" x $data_ratio\","
+  [[ $keyvar == "Metadata"* ]] && valuevar="\" x $metadata_ratio\","
+  [[ $keyvar == "System"* ]] && valuevar="\"x $metadata_ratio\","
+  [[ "${keylist[$j]}" == "Reserve" ]] && valuevar="\"x $metadata_ratio )\","
+  [[ $keyvar == "Reserve" ]] && valuevar="\"( Estimated:\","
+  [[ $keyvar == "Unallocated" ]] && valuevar="\"$free_estimated\","
+  [[ $keyvar == "Free %" ]] && valuevar="\"$free_estimated_pct )\"}"
+  data_js="$data_js \"$keyvar\":$valuevar"
+done
+data_js="$data_js, {\"\":\"\","
+for ((i=1; i<${#keylist[@]}; i++))
+do
+  keyvar="${keylist[$i]}"
+  valuevar="\"\","
+  [[ $keyvar == "Reserve" ]] && valuevar="\"( Est. statfs:\","
+  [[ $keyvar == "Unallocated" ]] && valuevar="\"$free_statfs\","
+  [[ $keyvar == "Free %" ]] && valuevar="\"$free_statfs_pct )\"}"
+  data_js="$data_js \"$keyvar\":$valuevar"
+done
+data_js="$data_js, {\"\":\"\","
+for ((i=1; i<${#keylist[@]}; i++))
+do
+  keyvar="${keylist[$i]}"
+  valuevar="\"\","
+  [[ $keyvar == "Reserve" ]] && valuevar="\"( Est. min:\","
+  [[ $keyvar == "Unallocated" ]] && valuevar="\"$free_estimated_min\","
+  [[ $keyvar == "Free %" ]] && valuevar="\"$free_estimated_min_pct )\"}"
+  data_js="$data_js \"$keyvar\":$valuevar"
+done
+drawJsonTableSeparator
+for stat in "Used:" "Alloc. usage:"
+do
+    data_js="$data_js, { "
+    for ((i=0; i<${#keylist[@]}; i++))
+    do
+      keyvar="${keylist[$i]}"
+      valuevar=""
+      [[ $keyvar == "Device Path" ]] && valuevar="\"$stat\","
+      [[ $keyvar == "Device ID" ]] && [[ $stat == "Used:" ]] && valuevar="\"Usage:\","
+      if [[ $keyvar == "Device size" ]]; then
+        if [[ $stat == "Used:" ]]; then
+          valuevar="\"$dev_used\","
+        elif [[ $stat == "Alloc. usage:" ]]; then
+          valuevar="\"$dev_allocated_pct\","
+        fi
+      fi
+      if [[ $keyvar == "Reserve" ]]; then
+        if [[ $stat == "Used:" ]]; then
+          valuevar="\"$global_reserve_used\","
+        elif [[ $stat == "Alloc. usage:" ]]; then
+          valuevar="\"$global_reserve_pct\","
+        fi
+      fi
+
+      if cat $fiUsageFile_stats | grep "$keyvar" > /dev/null ; then
+        [[ $stat == "Used:" ]] &&  valuevar="\"$(cat $fiUsageFile_stats | grep -m1 "^$keyvar" | awk '{print $3}' | cut -d':' -f2 | cut -d',' -f1)\","
+        [[ $stat == "Alloc. usage:" ]] &&  valuevar="\"$(cat $fiUsageFile_stats | grep -m1 "^$keyvar" | awk '{print $4}' | cut -d'(' -f2 | cut -d')' -f1)\","
+      fi
+      [[ $valuevar == "" ]] && valuevar="\"\","
+      [[ $keyvar == "Free %" ]] && valuevar="\"\"}"
+      data_js="$data_js \"$keyvar\":$valuevar"
+    done
+done
+#drawJsonTableSeparator
+data_js="$data_js]"
+
+echo ""
+#Print title
+echo "INFO: UUID=$uuid"
+if ! mount | grep -q " $1 "; then
+  echo "INFO: $1 is a symlink, fs is mounted on $(readlink -f $1)"
+fi
+#Print scrub info
+if [[ ! -z $scrub_status ]]; then
+  echo "INFO: $scrub_status"
+fi
+
+for status in "in progress" "queued"; do
+  #Print add status
+  if [[ $add_status == *"$status"* ]]; then
+    echo "INFO: $add_status"
+  fi
+  #Print remove status
+  if [[ $remove_status  == *"$status"* ]]; then
+    echo "INFO: $remove_status"
+  fi
+  #Print balance info
+  if [[ $balance_status == *"$status"* ]]; then
+    echo "INFO: $balance_status"
+  fi
+done
+
+echo ""
+drawLine
+echo "Usage statistics"
+drawLine
+# Print Usage statistics
+echo $data_js | jsonArrayToTable
+drawLine
+
+#Print scrub status
+if [[ ! -z $scrub_status_js ]]; then
+  echo ""
+  echo ""
+  total_width=$(echo "$scrub_status_js" | jsonArrayToTable | head -n1 | wc -c)
+  drawLine
+  echo $scrub_state
+  drawLine
+  echo "$scrub_status_js" | jsonArrayToTable
+
+  if echo "$scrub_status_js" | jq '.[] | .["Error summary"]' | grep -q "read="
+  then
+    read_error_list="["
+    drawLine && echo "[{\"ERROR: read error found during scrub\":\"\"}]" | jsonArrayToTable
+    #Find boot of last scrub
+    journalctl -k --output=cat --grep='BTRFS .* i/o error' | sort | uniq | while read line
+    do
+      read_error_list="$read_error_list{\"Device Path\":\"$(echo $line | sed 's/on dev /%/' | cut -d'%' -f2 | cut -d',' -f1 | xargs)\", \
+      \"Physical\":\"$(echo $line | sed 's/, physical /%/' | cut -d'%' -f2 | cut -d',' -f1 | xargs)\", \
+      \"Root\":\"$(echo $line | sed 's/, root /%/' | cut -d'%' -f2 | cut -d',' -f1 | xargs)\", \
+      \"Inode\":\"$(echo $line | sed 's/, inode /%/' | cut -d'%' -f2 | cut -d',' -f1 | xargs)\", \
+      \"Links\":\"$(echo $line | sed 's/, links /%/' | cut -d'%' -f2 | cut -d' ' -f1)\", \
+      \"Path\":\"$(echo $line | sed 's/(path: /%/' | cut -d'%' -f2 | cut -d')' -f1)\"}, "
+    done
+    echo "${read_error_list/%??}]" | jsonArrayToTable
+  fi
+  drawLine
+fi
+
+#Print balance status
+if [[ ! -z $balance_status_js ]]; then
+  echo ""
+  echo ""
+  total_width1=$(echo "$balance_status_js" | jsonArrayToTable | head -n1 | wc -c)
+  total_width2=${#balance_state}
+  total_width=$(( total_width1 > total_width2 ? total_width1 : total_width2 ))
+  drawLine
+  echo $balance_state
+  drawLine
+  echo "$balance_status_js" | jsonArrayToTable
+  drawLine
+fi
+
+#Print replace status
+if [[ ! -z $replace_status_js ]]; then
+  echo ""
+  echo ""
+  total_width1=$(echo "$replace_status_js" | jsonArrayToTable | head -n1 | wc -c)
+  total_width2=${#replace_state}
+  total_width=$(( total_width1 > total_width2 ? total_width1 : total_width2 ))
+  drawLine
+  echo $replace_state
+  drawLine
+  echo "$replace_status_js" | jsonArrayToTable
+  drawLine
+fi
+
+#Cleaning
+rm $fiUsageFile $fiUsageFile_stats $fiUsageFile_b $deUsageFile $deUsageFile_b
