@@ -1,2 +1,2 @@
 #!/bin/bash
-ps aux | grep btrfs | grep -v grep | grep -v "\[btrfs" | grep -v "\[kworker"
+ps aux | grep btrfs | grep -v grep | grep -v "\[btrfs" | grep -v "\[kworker" | grep -v "/usr/bin/dockerd"
