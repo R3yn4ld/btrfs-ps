@@ -1,0 +1,2 @@
+#!/bin/bash
+ps aux | grep btrfs | grep -v "\[btrfs" | grep -v "\[kworker"
