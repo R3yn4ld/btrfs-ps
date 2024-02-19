@@ -289,26 +289,28 @@ elif [[ $balance_status == "Balance on"* ]]; then
   chunks_balanced=$(echo $balance_progress | awk '{print $6}')
 
   total_chunks="$(echo $balance_progress | awk '{print $10}')"
-  time_left_s=$(echo "($duration_s/$chunks_balanced)*($total_chunks-$chunks_balanced)" | bc )
-  if [[ $time_left_s -gt 86400 ]]; then
-    time_left=$(date -d@$time_left_s -u +'%d:%H:%M:%S')
-  else
-    time_left=$(date -d@$time_left_s -u +'%H:%M:%S')
-  fi
-  filler=$(printf '%.s ' $(seq 1 ${#time_left}))
-  time_left_title="Time left"
-  time_left_title=$(printf '%s\n' "$time_left_title${filler:${#time_left_title}}")
-
-  eta=$(echo "$(date +%s)+$time_left_s" | bc)
-  if [[ $(date +'%a %d/%m') == $(date -d@$eta +'%a %d/%m') ]]
+  if [[ chunks_balanced -gt 0 ]]
   then
-    est_completion=$(date -d@$eta +'%H:%M:%S')
-    est_completion_title="Est. completion at"
-  else
-    est_completion=$(date -d@$eta +'%a %d/%m %H:%M:%S')
-    est_completion_title="Est. completion on"
+    time_left_s=$(echo "($duration_s/$chunks_balanced)*($total_chunks-$chunks_balanced)" | bc )
+    if [[ $time_left_s -gt 86400 ]]; then
+      time_left=$(date -d@$time_left_s -u +'%d:%H:%M:%S')
+    else
+      time_left=$(date -d@$time_left_s -u +'%H:%M:%S')
+    fi
+    filler=$(printf '%.s ' $(seq 1 ${#time_left}))
+    time_left_title="Time left"
+    time_left_title=$(printf '%s\n' "$time_left_title${filler:${#time_left_title}}")
+  
+    eta=$(echo "$(date +%s)+$time_left_s" | bc)
+    if [[ $(date +'%a %d/%m') == $(date -d@$eta +'%a %d/%m') ]]
+    then
+      est_completion=$(date -d@$eta +'%H:%M:%S')
+      est_completion_title="Est. completion at"
+    else
+      est_completion=$(date -d@$eta +'%a %d/%m %H:%M:%S')
+      est_completion_title="Est. completion on"
+    fi
   fi
-
   rate="$(echo "scale=2;($chunks_balanced/$duration_s)*60" | bc) chunks/min"
   filler=$(printf '%.s ' $(seq 1 ${#rate}))
   rate_title="Rate"
@@ -493,7 +495,7 @@ data_js="$data_js]"
 echo ""
 #Print title
 echo "INFO: UUID=$uuid"
-if ! mount | grep -q " $1 "; then
+if ! mount | grep -q " ${1%/} "; then
   echo "INFO: $1 is a symlink, fs is mounted on $(readlink -f $1)"
 fi
 #Print scrub info
