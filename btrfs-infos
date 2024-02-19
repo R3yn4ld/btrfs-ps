@@ -172,7 +172,7 @@ else
 fi
 
 #Get add status
-add_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'add' )
+add_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'add' )
 add_arguments=$(echo $add_process | sed 's/add /%/'| cut -d'%' -f2 | sed 's|--bg||' | sed 's|--enqueue||')
 added_disk=$(echo $add_arguments | awk '{print $1}')
 dest_fs=$(echo $add_arguments | awk '{print $2}')
@@ -185,7 +185,7 @@ if [[ $dest_fs == $1 ]]; then
 fi
 
 #Get remove status
-remove_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'remove' )
+remove_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'remove' )
 remove_arguments=$(echo $remove_process | sed 's/remove /%/'| cut -d'%' -f2 | sed 's|--bg||' | sed 's|--enqueue||')
 removed_disk=$(echo $remove_arguments | awk '{print $1}')
 dest_fs=$(echo $remove_arguments | awk '{print $2}')
@@ -198,14 +198,14 @@ if [[ $dest_fs == $1 ]]; then
 fi
 
 #Get replace status
-replace_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'replace')
+replace_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'replace')
 replace_arguments=$(echo $replace_process | sed 's/replace /%/'| cut -d'%' -f2 | sed 's|--bg||' | sed 's|--enqueue||')
 replaced_disk=$(echo $replace_arguments | awk '{print $1}')
 dest_fs=$(echo $replace_arguments | awk '{print $2}')
 if [[ $dest_fs == $1 ]]; then
   replace_status="Replacement of $replace_arguments in progress"
 fi
-replace_progress=$(echo "$(sudo btrfs replace status $1) " | grep " ${1} " )
+replace_progress=$(echo "$(sudo btrfs replace status $1) " | grep " ${1%/} " )
 if [[ $replace_progress == *"done"* ]]; then
   replace_state="Replacing of $(echo $replace_arguments |awk '{print $1}') by $(echo $replace_arguments |awk '{print $2}') in progress"
   replace_progress=$(echo $replace_progress | sed 's|done| |g' | sed 's| write errs, | |g' | sed 's| uncorr. read errs| |g' | sed 's|, | |g' )
@@ -247,7 +247,7 @@ balance_progress="$(sudo btrfs balance status $1)"
 
 #balance_status=${balance_status//running/running:} # no ':' if no balance running
 balance_status=${balance_progress##*:} #will show eventually "No balance running"
-balance_process=$(sudo ps aux | grep 'btrfs' | grep " ${1}" | grep -v -E "${1}[a-z]" | grep -m1 'btrfs balance start')
+balance_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'btrfs balance start')
 
 balance_arguments=$(echo $balance_process | sed 's|start |%|' | cut -d'%' -f2 | sed "s|$1||"| sed 's|--bg||')
 if [[ $balance_status == "No balance found"* ]]  ; then
