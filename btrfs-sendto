@@ -1,0 +1,6 @@
+#/bin/bash
+echo "Calculating size"
+size=$(du -b -d0 "$1" | awk '{print $1}')
+echo "Sending $(numfmt --to=iec-i --suffix=B --format='%9.2f' $size) from $1 to $2 ..."
+btrfs send "$1" | pv -s $size | btrfs receive "$2" 2>&1 | grep -v -e'^At subvol ' -e'^At snapshot '
+exit
