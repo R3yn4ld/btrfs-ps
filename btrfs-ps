@@ -1,2 +1,3 @@
 #!/bin/bash
-ps aux | grep btrfs | grep -v btrfs-ps | grep -v "\[btrfs" | grep -v "\[kworker" | grep -v "/usr/bin/dockerd"
+ps aux | head -n1
+ps aux | grep btrfs | grep -v btrfs-ps | grep -v "\[btrfs" | grep -v "\[kworker" | grep -v "/usr/bin/dockerd" | grep -v grep || echo "No process found"
