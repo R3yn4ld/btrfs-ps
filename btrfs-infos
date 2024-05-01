@@ -247,80 +247,77 @@ balance_progress="$(sudo btrfs balance status $1)"
 
 #balance_status=${balance_status//running/running:} # no ':' if no balance running
 balance_status=${balance_progress##*:} #will show eventually "No balance running"
-balance_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'btrfs balance')
-balance_arguments=$(echo $balance_process | sed 's|start |%|' | sed 's|resume |%|' | cut -d'%' -f2 | sed "s|$1||"| sed 's|--bg||')
 
 if [[ $balance_status == "No balance found"* ]]  ; then
   balance_state="Balance not running"
-  if [[ $balance_arguments == *"enqueue"* ]] ; then
-    balance_status=$( echo "Balance queued with arguments $balance_arguments" | sed 's|--enqueue||')
-  else
-    balance_status=""
-  fi
 elif [[ $balance_status == "Balance on"* ]]; then
-  [[ $balance_arguments != "" ]] && balance_state="Balance in progress with arguments: $balance_arguments"
-  [[ $balance_arguments == "" ]] && balance_state="Balance in progress with default parameters"
-  balance_status="Balance in progress"
-  balance_pid=$(echo $balance_process | awk '{print $2}')
-
-  start_time=$(ps -eo pid,lstart |grep "$balance_pid" | sed "s|$balance_pid ||")
-  start_time_epoch=$(date -d "$start_time" +%s)
-  if [[ $(date +'%a %d/%m') == $(date -d "$start_time" +'%a %d/%m') ]]
-  then
-    start_time=$(date -d "$start_time" +'%H:%M:%S')
-    started_title="Started at"
-  else
-    start_time=$(date -d "$start_time" +'%a %d/%m %H:%M:%S')
-    started_title="Started on"
-  fi
-  filler=$(printf '%.s ' $(seq 1 ${#start_time}))
-  started_title=$(printf '%s\n' "$started_title${filler:${#started_title}}")
-
-  duration_title="Duration"
-  duration=$(ps -eo pid,etime= |grep "$balance_pid" | sed "s|$balance_pid ||" | xargs)
-  lenght="${duration//[^:]}" #get number of : in $duration
-  [[ "${#lenght}" -eq 1 ]] && duration="0:$duration" #add 0: if only one to get hh:mm:ss instead of mm:ss
-  duration_s=$(TZ=utc date -d "1970-01-01 $duration" +%s)
-
-  filler=$(printf '%.s ' $(seq 1 ${#duration}))
-  duration_title=$(printf '%s\n' "$duration_title${filler:${#duration_title}}")
-
+  balance_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'btrfs balance')
+  balance_arguments=$(echo $balance_process | sed 's|start |%|' | sed 's|resume |%|' | cut -d'%' -f2 | sed "s|$1||"| sed 's|--bg||')
   chunks_balanced_title="Balanced"
   chunks_balanced=$(echo $balance_progress | awk '{print $6}')
-
   total_chunks="$(echo $balance_progress | awk '{print $10}')"
-  if [[ chunks_balanced -gt 0 ]]
-  then
-    time_left_s=$(echo "($duration_s/$chunks_balanced)*($total_chunks-$chunks_balanced)" | bc )
-    if [[ $time_left_s -gt 86400 ]]; then
-      time_left=$(date -d@$time_left_s -u +'%d:%H:%M:%S')
-    else
-      time_left=$(date -d@$time_left_s -u +'%H:%M:%S')
-    fi
-    filler=$(printf '%.s ' $(seq 1 ${#time_left}))
-    time_left_title="Time left"
-    time_left_title=$(printf '%s\n' "$time_left_title${filler:${#time_left_title}}")
-  
-    eta=$(echo "$(date +%s)+$time_left_s" | bc)
-    if [[ $(date +'%a %d/%m') == $(date -d@$eta +'%a %d/%m') ]]
-    then
-      est_completion=$(date -d@$eta +'%H:%M:%S')
-      est_completion_title="Est. completion at"
-    else
-      est_completion=$(date -d@$eta +'%a %d/%m %H:%M:%S')
-      est_completion_title="Est. completion on"
-    fi
-  fi
-  rate="$(echo "scale=2;($chunks_balanced/$duration_s)*60" | bc) chunks/min"
-  filler=$(printf '%.s ' $(seq 1 ${#rate}))
-  rate_title="Rate"
-  rate_title=$(printf '%s\n' "$rate_title${filler:${#rate_title}}")
-
   chunks_balanced_pct=$(echo $(echo "scale=2;$chunks_balanced*100/$total_chunks" | bc)"%")
   chunks_balanced="$chunks_balanced chunks ($chunks_balanced_pct)"
   filler=$(printf '%.s ' $(seq 1 ${#chunks_balanced}))
   chunks_balanced_title=$(printf '%s\n' "$chunks_balanced_title${filler:${#chunks_balanced_title}}")
 
+  if [[ $balance_status != *"paused"* ]] then
+    balance_status="Balance in progress"
+    balance_pid=$(echo $balance_process | awk '{print $2}')
+    start_time=$(ps -eo pid,lstart |grep "$balance_pid" | sed "s|$balance_pid ||")
+    start_time_epoch=$(date -d "$start_time" +%s)
+
+    if [[ $(date +'%a %d/%m') == $(date -d "$start_time" +'%a %d/%m') ]]
+    then
+      start_time=$(date -d "$start_time" +'%H:%M:%S')
+      started_title="Started at"
+    else
+      start_time=$(date -d "$start_time" +'%a %d/%m %H:%M:%S')
+      started_title="Started on"
+    fi
+    filler=$(printf '%.s ' $(seq 1 ${#start_time}))
+    started_title=$(printf '%s\n' "$started_title${filler:${#started_title}}")
+
+    duration_title="Duration"
+    duration=$(ps -eo pid,etime= |grep "$balance_pid" | sed "s|$balance_pid ||" | xargs)
+    lenght="${duration//[^:]}" #get number of : in $duration
+    [[ "${#lenght}" -eq 1 ]] && duration="0:$duration" #add 0: if only one to get hh:mm:ss instead of mm:ss
+    duration_s=$(TZ=utc date -d "1970-01-01 $duration" +%s)
+
+    filler=$(printf '%.s ' $(seq 1 ${#duration}))
+    duration_title=$(printf '%s\n' "$duration_title${filler:${#duration_title}}")
+
+    if [[ chunks_balanced -gt 0 ]]
+    then
+      time_left_s=$(echo "($duration_s/$chunks_balanced)*($total_chunks-$chunks_balanced)" | bc )
+      if [[ $time_left_s -gt 86400 ]]; then
+        time_left=$(date -d@$time_left_s -u +'%d:%H:%M:%S')
+      else
+        time_left=$(date -d@$time_left_s -u +'%H:%M:%S')
+      fi
+      filler=$(printf '%.s ' $(seq 1 ${#time_left}))
+      time_left_title="Time left"
+      time_left_title=$(printf '%s\n' "$time_left_title${filler:${#time_left_title}}")
+      eta=$(echo "$(date +%s)+$time_left_s" | bc)
+      if [[ $(date +'%a %d/%m') == $(date -d@$eta +'%a %d/%m') ]]
+      then
+        est_completion=$(date -d@$eta +'%H:%M:%S')
+        est_completion_title="Est. completion at"
+      else
+        est_completion=$(date -d@$eta +'%a %d/%m %H:%M:%S')
+        est_completion_title="Est. completion on"
+      fi
+    fi
+    rate="$(echo "scale=2;($chunks_balanced/$duration_s)*60" | bc) chunks/min"
+    filler=$(printf '%.s ' $(seq 1 ${#rate}))
+    rate_title="Rate"
+    rate_title=$(printf '%s\n' "$rate_title${filler:${#rate_title}}")
+  fi
+
+  [[ $balance_arguments != "" ]] && balance_state="Balance in progress with arguments: $balance_arguments"
+  [[ $balance_arguments == "" ]] && balance_state="Balance in progress with default parameters"
+  [[ $balance_arguments == *"enqueue"* ]] && balance_state=$( echo "Balance queued with arguments $balance_arguments" | sed 's|--enqueue||')
+  [[ $balance_status == *"paused"* ]] && balance_state=$( echo "Balance paused")
 
   balance_status_js="[{\"$started_title\":\"$start_time\", \
                     \"$duration_title\":\"$duration\", \
