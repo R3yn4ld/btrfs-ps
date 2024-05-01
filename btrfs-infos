@@ -487,8 +487,15 @@ done
 data_js="$data_js]"
 
 echo ""
+drawLine
+echo "Usage statistics - UUID=$uuid"
+drawLine
+# Print Usage statistics
+echo $data_js | jsonArrayToTable
+drawLine
+
 #Print title
-echo "INFO: UUID=$uuid"
+#echo "INFO: UUID=$uuid"
 if ! mount | grep -q " ${1%/} "; then
   echo "INFO: $1 is a symlink, fs is mounted on $(readlink -f $1)"
 fi
@@ -497,6 +504,7 @@ if [[ ! -z $scrub_status ]]; then
   echo "INFO: $scrub_status"
 fi
 
+#Operations
 for status in "in progress" "queued"; do
   #Print add status
   if [[ $add_status == *"$status"* ]]; then
@@ -511,14 +519,6 @@ for status in "in progress" "queued"; do
     echo "INFO: $balance_status"
   fi
 done
-
-echo ""
-drawLine
-echo "Usage statistics"
-drawLine
-# Print Usage statistics
-echo $data_js | jsonArrayToTable
-drawLine
 
 #Print scrub status
 if [[ ! -z $scrub_status_js ]]; then
