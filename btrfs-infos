@@ -257,10 +257,9 @@ elif [[ $balance_status == "Balance on"* ]]; then
   chunks_balanced=$(echo $balance_progress | awk '{print $6}')
   total_chunks="$(echo $balance_progress | awk '{print $10}')"
   chunks_balanced_pct=$(echo $(echo "scale=2;$chunks_balanced*100/$total_chunks" | bc)"%")
-  chunks_balanced="$chunks_balanced chunks ($chunks_balanced_pct)"
-  filler=$(printf '%.s ' $(seq 1 ${#chunks_balanced}))
+  chunks_balanced_disp="$chunks_balanced chunks ($chunks_balanced_pct)"
+  filler=$(printf '%.s ' $(seq 1 ${#chunks_balanced_disp}))
   chunks_balanced_title=$(printf '%s\n' "$chunks_balanced_title${filler:${#chunks_balanced_title}}")
-
   if [[ $balance_status != *"paused"* ]] then
     balance_status="Balance in progress"
     balance_pid=$(echo $balance_process | awk '{print $2}')
@@ -286,7 +285,6 @@ elif [[ $balance_status == "Balance on"* ]]; then
 
     filler=$(printf '%.s ' $(seq 1 ${#duration}))
     duration_title=$(printf '%s\n' "$duration_title${filler:${#duration_title}}")
-
     if [[ chunks_balanced -gt 0 ]]
     then
       time_left_s=$(echo "($duration_s/$chunks_balanced)*($total_chunks-$chunks_balanced)" | bc )
@@ -313,7 +311,6 @@ elif [[ $balance_status == "Balance on"* ]]; then
     rate_title="Rate"
     rate_title=$(printf '%s\n' "$rate_title${filler:${#rate_title}}")
   fi
-
   [[ $balance_arguments != "" ]] && balance_state="Balance in progress with arguments: $balance_arguments"
   [[ $balance_arguments == "" ]] && balance_state="Balance in progress with default parameters"
   [[ $balance_arguments == *"enqueue"* ]] && balance_state=$( echo "Balance queued with arguments $balance_arguments" | sed 's|--enqueue||')
@@ -324,7 +321,7 @@ elif [[ $balance_status == "Balance on"* ]]; then
                     \"$time_left_title\":\"$time_left\", \
                     \"$est_completion_title\":\"$est_completion\", \
                     \"Total to balance\":\"$total_chunks chunks\", \
-                    \"$chunks_balanced_title\":\"$chunks_balanced\",
+                    \"$chunks_balanced_title\":\"$chunks_balanced_disp\",
                     \"$rate_title\":\"$rate\"}]"
 fi
 
