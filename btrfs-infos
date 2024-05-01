@@ -247,7 +247,9 @@ balance_progress="$(sudo btrfs balance status $1)"
 
 #balance_status=${balance_status//running/running:} # no ':' if no balance running
 balance_status=${balance_progress##*:} #will show eventually "No balance running"
+balance_process=$(sudo ps aux | grep 'btrfs' | grep " ${1%/}" | grep -v -E "${1%/}[a-z]" | grep -m1 'btrfs balance')
 balance_arguments=$(echo $balance_process | sed 's|start |%|' | sed 's|resume |%|' | cut -d'%' -f2 | sed "s|$1||"| sed 's|--bg||')
+
 if [[ $balance_status == "No balance found"* ]]  ; then
   balance_state="Balance not running"
   if [[ $balance_arguments == *"enqueue"* ]] ; then
