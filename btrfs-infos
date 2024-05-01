@@ -504,6 +504,7 @@ if [[ ! -z $scrub_status ]]; then
   echo "INFO: $scrub_status"
 fi
 
+echo ""
 #Operations
 for status in "in progress" "queued"; do
   #Print add status
@@ -579,3 +580,4 @@ fi
 
 #Cleaning
 rm $fiUsageFile $fiUsageFile_stats $fiUsageFile_b $deUsageFile $deUsageFile_b
+echo ""
